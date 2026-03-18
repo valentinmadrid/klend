@@ -217,15 +217,19 @@ pub const EXPONENT_CLMM_ID_MAINNET: Pubkey =
 pub const EXPONENT_ORDERBOOK_ID_MAINNET: Pubkey =
     pubkey!("XPBookgQTN2p8Yw1C2La35XkPMmZTCEYH77AdReVvK1");
 
+pub const SQUADS_SMART_ACCOUNT_PROGRAM_ID_MAINNET_PROD: Pubkey =
+    pubkey!("SMRTzfY6DfH5ik3TKiyLFfXexV8uSG3d2UksSCYdunG");
+
 pub const AGRO_ID_MAINNET: Pubkey = pubkey!("AgroFiE3bX7j4Tvfa7YAoFLqjjb35Bw6eed5BuYukPEn");
 pub const AGRO_STAGING_ID_MAINNET: Pubkey = pubkey!("E7jPY6J5s2uAxAjJQX5tqoASkmFr6TYxVoMm97hPLNZ1");
 
-pub const CPI_WHITELISTED_ACCOUNTS: [CpiWhitelistedAccount; 18] = [
+pub const CPI_WHITELISTED_ACCOUNTS: [CpiWhitelistedAccount; 19] = [
     CpiWhitelistedAccount::new(FLEX_LEND_ID_MAINNET_PROD, 1),
     CpiWhitelistedAccount::new(SQUADS_PROGRAM_ID_V3_MAINNET_PROD, 1),
     CpiWhitelistedAccount::new(SQUADS_PROGRAM_ID_V3_MAINNET_DEV, 1),
     CpiWhitelistedAccount::new(SQUADS_PROGRAM_ID_V4_MAINNET_PROD, 1),
     CpiWhitelistedAccount::new(SQUADS_PROGRAM_ID_V4_MAINNET_DEV, 1),
+    CpiWhitelistedAccount::new(SQUADS_SMART_ACCOUNT_PROGRAM_ID_MAINNET_PROD, 1),
     CpiWhitelistedAccount::new(METEORA_DYNAMIC_POOL_ID_MAINNET, 1),
     CpiWhitelistedAccount::new(DEFI_CARROT_ID_MAINNET, 1),
     CpiWhitelistedAccount::new(SANDGLASS_ID_MAINNET, 1),

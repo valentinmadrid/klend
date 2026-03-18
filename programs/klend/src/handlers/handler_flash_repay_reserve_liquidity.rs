@@ -22,7 +22,7 @@ pub fn process(
     let initial_reserve_token_balance = token_interface::accessor::amount(
         &ctx.accounts.reserve_destination_liquidity.to_account_info(),
     )?;
-    let initial_reserve_available_liquidity = reserve.liquidity.available_amount;
+    let initial_reserve_available_liquidity = reserve.total_available_liquidity_amount();
 
     flash_ixs::flash_repay_checks(&ctx, borrow_instruction_index, liquidity_amount)?;
 
@@ -34,6 +34,7 @@ pub fn process(
                 let referrer_token_state = &mut referrer_token_state_loader.load_mut()?;
 
                 validate_referrer_token_state(
+                    &crate::ID,
                     referrer_token_state,
                     referrer_token_state_loader.key(),
                     reserve.liquidity.mint_pubkey,
@@ -57,7 +58,7 @@ pub fn process(
             lending_market,
             reserve,
             liquidity_amount,
-            Clock::get()?.slot,
+            u64::try_from(Clock::get()?.unix_timestamp).unwrap(),
             referrer_token_state_loader,
         )?;
 
@@ -90,7 +91,7 @@ pub fn process(
             &ctx.accounts.reserve_destination_liquidity.to_account_info(),
         )
         .unwrap(),
-        reserve.liquidity.available_amount,
+        reserve.total_available_liquidity_amount(),
         initial_reserve_token_balance,
         initial_reserve_available_liquidity,
         LendingAction::Additive(flash_loan_amount_with_referrer_fee),
@@ -99,10 +100,12 @@ pub fn process(
     Ok(())
 }
 
+
 #[derive(Accounts)]
 pub struct FlashRepayReserveLiquidity<'info> {
     pub user_transfer_authority: Signer<'info>,
 
+    /// CHECK: Verified through create_program_address, unused needed for `FlashBorrowReserveLiquidity`
     #[account(
         seeds = [seeds::LENDING_MARKET_AUTH, lending_market.key().as_ref()],
         bump = lending_market.load()?.bump_seed as u8,
@@ -122,11 +125,13 @@ pub struct FlashRepayReserveLiquidity<'info> {
     )]
     pub reserve_liquidity_mint: Box<InterfaceAccount<'info, Mint>>,
 
+   
     #[account(mut,
         address = reserve.load()?.liquidity.supply_vault,
     )]
     pub reserve_destination_liquidity: Box<InterfaceAccount<'info, TokenAccount>>,
 
+   
     #[account(mut)]
     pub user_source_liquidity: Box<InterfaceAccount<'info, TokenAccount>>,
 
@@ -141,6 +146,7 @@ pub struct FlashRepayReserveLiquidity<'info> {
     #[account(mut)]
     pub referrer_account: Option<AccountInfo<'info>>,
 
+    /// CHECK: fixed address
     #[account(address = sysvar::instructions::ID)]
     pub sysvar_info: AccountInfo<'info>,
     pub token_program: Interface<'info, TokenInterface>,

@@ -11,8 +11,8 @@ pub fn process(ctx: Context<RefreshObligation>) -> Result<()> {
     let obligation = &mut ctx.accounts.obligation.load_mut()?;
     let clock = &Clock::get()?;
     let lending_market = &ctx.accounts.lending_market.load()?;
-    let borrow_count = obligation.borrows_count();
-    let deposit_count = obligation.deposits_count();
+    let borrow_count = obligation.active_borrows_count();
+    let deposit_count = obligation.active_deposits_count();
     let reserves_count = borrow_count + deposit_count;
 
     let expected_remaining_accounts = if obligation.has_referrer() {
@@ -23,8 +23,9 @@ pub fn process(ctx: Context<RefreshObligation>) -> Result<()> {
 
     if ctx.remaining_accounts.len() != expected_remaining_accounts {
         msg!(
-            "expected_remaining_accounts={} obligation.has_referrer()={} reserves_count={} borrow_count={}",
+            "expected_remaining_accounts={}, actual_remaining_accounts {} obligation.has_referrer()={} reserves_count={} borrow_count={}",
             expected_remaining_accounts,
+            ctx.remaining_accounts.len(),
             obligation.has_referrer(),
             reserves_count,
             borrow_count
@@ -54,9 +55,10 @@ pub fn process(ctx: Context<RefreshObligation>) -> Result<()> {
             });
 
     lending_operations::refresh_obligation(
+        &crate::ID,
         obligation,
         lending_market,
-        clock.slot,
+        clock,
         deposit_reserves_iter,
         borrow_reserves_iter,
         referrer_token_states_iter,
@@ -70,4 +72,7 @@ pub struct RefreshObligation<'info> {
     pub lending_market: AccountLoader<'info, LendingMarket>,
     #[account(mut, has_one = lending_market)]
     pub obligation: AccountLoader<'info, Obligation>,
+   
+   
+   
 }

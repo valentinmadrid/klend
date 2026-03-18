@@ -3,19 +3,20 @@ use anchor_lang::{
     solana_program::sysvar::{instructions::Instructions as SysInstructions, SysvarId},
     Accounts,
 };
-use anchor_spl::token::Token;
-use anchor_spl::token_interface::{self, Mint, TokenAccount, TokenInterface};
+use anchor_spl::{
+    token::Token,
+    token_interface::{self, Mint, TokenAccount, TokenInterface},
+};
 
 use crate::{
-    check_cpi, gen_signer_seeds,
+    gen_signer_seeds,
     lending_market::{lending_checks, lending_operations},
     state::{LendingMarket, RedeemReserveCollateralAccounts, Reserve},
     utils::{seeds, token_transfer},
-    LendingAction,
+    LendingAction, RedeemCollateralOptions,
 };
 
 pub fn process(ctx: Context<RedeemReserveCollateral>, collateral_amount: u64) -> Result<()> {
-    check_cpi!(ctx);
     lending_checks::redeem_reserve_collateral_checks(&RedeemReserveCollateralAccounts {
         user_source_collateral: ctx.accounts.user_source_collateral.clone(),
         user_destination_liquidity: ctx.accounts.user_destination_liquidity.clone(),
@@ -41,11 +42,15 @@ pub fn process(ctx: Context<RedeemReserveCollateral>, collateral_amount: u64) ->
     let initial_reserve_token_balance = token_interface::accessor::amount(
         &ctx.accounts.reserve_liquidity_supply.to_account_info(),
     )?;
-    let initial_reserve_available_liquidity = reserve.liquidity.available_amount;
+    let initial_reserve_available_liquidity = reserve.total_available_liquidity_amount();
 
     lending_operations::refresh_reserve(reserve, &clock, None, lending_market.referral_fee_bps)?;
-    let withdraw_liquidity_amount =
-        lending_operations::redeem_reserve_collateral(reserve, collateral_amount, &clock, true)?;
+    let withdraw_liquidity_amount = lending_operations::redeem_reserve_collateral(
+        reserve,
+        collateral_amount,
+        &clock,
+        RedeemCollateralOptions::REGULAR,
+    )?;
 
     msg!(
         "pnl: Redeeming reserve collateral {}",
@@ -71,7 +76,7 @@ pub fn process(ctx: Context<RedeemReserveCollateral>, collateral_amount: u64) ->
     lending_checks::post_transfer_vault_balance_liquidity_reserve_checks(
         token_interface::accessor::amount(&ctx.accounts.reserve_liquidity_supply.to_account_info())
             .unwrap(),
-        reserve.liquidity.available_amount,
+        reserve.total_available_liquidity_amount(),
         initial_reserve_token_balance,
         initial_reserve_available_liquidity,
         LendingAction::Subtractive(withdraw_liquidity_amount),
@@ -90,13 +95,14 @@ pub struct RedeemReserveCollateral<'info> {
         has_one = lending_market
     )]
     pub reserve: AccountLoader<'info, Reserve>,
+    /// CHECK: Verified through create_program_address
     #[account(
         seeds = [seeds::LENDING_MARKET_AUTH, lending_market.key().as_ref()],
         bump = lending_market.load()?.bump_seed as u8,
     )]
     pub lending_market_authority: AccountInfo<'info>,
 
-    #[account(mut,
+    #[account(
         address = reserve.load()?.liquidity.mint_pubkey,
         mint::token_program = liquidity_token_program,
     )]
@@ -116,12 +122,14 @@ pub struct RedeemReserveCollateral<'info> {
     pub user_source_collateral: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(mut,
         token::mint = reserve.load()?.liquidity.mint_pubkey,
+        token::authority = owner
     )]
     pub user_destination_liquidity: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub collateral_token_program: Program<'info, Token>,
     pub liquidity_token_program: Interface<'info, TokenInterface>,
 
+    /// CHECK: Syvar Instruction allowing introspection, fixed address
     #[account(address = SysInstructions::id())]
     pub instruction_sysvar_account: AccountInfo<'info>,
 }

@@ -94,8 +94,10 @@ pub fn check_refresh(
 
             let ix_discriminator: [u8; 8] = ix.data[0..8].try_into().unwrap();
 
+           
             require_keys_eq!(ix.program_id, crate::id());
 
+           
             let ix_discriminator_matches = ix_discriminator == required_ix.discriminator();
             if !ix_discriminator_matches {
                 for (i, ix) in required_ixns.iter().enumerate() {
@@ -108,6 +110,7 @@ pub fn check_refresh(
                 LendingError::IncorrectInstructionInPosition
             );
 
+           
             for (key, index) in required_ix.accounts.iter() {
                 require_keys_eq!(
                     ix.accounts
@@ -122,6 +125,23 @@ pub fn check_refresh(
         Ok(())
     };
 
+   
+   
+   
+   
+   
+
+   
+   
+   
+   
+   
+   
+   
+
+   
+
+   
     let refresh_reserve_ixs = if reserves.len() == 2 && reserves[0].0 == reserves[1].0 {
         reserves.len() - 1
     } else {
@@ -130,6 +150,7 @@ pub fn check_refresh(
 
     let mut required_pre_ixs = Vec::with_capacity(refresh_reserve_ixs + 1 + refresh_reserve_ixs);
     let mut required_post_ixs = Vec::with_capacity(refresh_reserve_ixs);
+
     for reserve in reserves.iter().take(refresh_reserve_ixs) {
         required_pre_ixs.push(RequiredIx {
             kind: RequiredIxType::RefreshReserve,
@@ -160,6 +181,10 @@ pub fn check_refresh(
             }
         });
 
+   
+   
+
+   
     required_pre_ixs.reverse();
     check_ixns(required_pre_ixs, AppendedIxType::PreIxs)?;
     check_ixns(required_post_ixs, AppendedIxType::PostIxs)?;
@@ -175,13 +200,45 @@ enum AppendedIxType {
     PostIxs,
 }
 
-fn _discriminator_to_ix(discriminator: [u8; 8]) -> &'static str {
-    match discriminator {
-        x if x == RefreshReserve::discriminator() => "RefreshReserve",
-        x if x == RefreshObligation::discriminator() => "RefreshObligation",
-        x if x == RefreshObligationFarmsForReserve::discriminator() => {
-            "RefreshObligationFarmsForReserve"
+pub(crate) mod cpi_refresh_farms {
+    use super::*;
+    use crate::{handlers::handler_refresh_obligation_farms_for_reserve::*, LendingError};
+
+    pub struct RefreshFarmsParams<'a, 'info> {
+        pub reserve: &'a AccountLoader<'info, Reserve>,
+        pub farms_accounts: &'a OptionalObligationFarmsAccounts<'info>,
+        pub farm_kind: ReserveFarmKind,
+    }
+
+    pub fn refresh_obligation_farms_for_reserve<'info>(
+        reserves_and_farms: RefreshFarmsParams<'_, 'info>,
+        obligation: &impl ToAccountInfo<'info>,
+        lending_market_authority: &impl ToAccountInfo<'info>,
+        lending_market: &AccountLoader<'info, crate::LendingMarket>,
+    ) -> Result<()> {
+        let RefreshFarmsParams {
+            reserve,
+            farms_accounts,
+            farm_kind,
+        } = reserves_and_farms;
+        if reserve.load()?.get_farm(farm_kind) != Pubkey::default() {
+            let (Some(reserve_farm_state), Some(obligation_farm_user_state)) = (
+                farms_accounts.reserve_farm_state.as_ref(),
+                farms_accounts.obligation_farm_user_state.as_ref(),
+            ) else {
+                return Err(LendingError::FarmAccountsMissing.into());
+            };
+            let refresh_accounts = RefreshObligationFarmsForReserveBase {
+                obligation: obligation.to_account_info(),
+                lending_market_authority: lending_market_authority.to_account_info(),
+                reserve: reserve.clone(),
+                reserve_farm_state: reserve_farm_state.clone(),
+                obligation_farm_user_state: obligation_farm_user_state.clone(),
+                lending_market: lending_market.clone(),
+            };
+            process_impl_refresh_obligation_farms_for_reserve(&refresh_accounts, farm_kind)
+        } else {
+            Ok(())
         }
-        _ => "unknown",
     }
 }

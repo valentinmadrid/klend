@@ -13,8 +13,6 @@ use crate::{
 pub fn process(ctx: Context<InitObligation>, args: InitObligationArgs) -> Result<()> {
     let clock = &Clock::get()?;
 
-    require!(args.id == 0, LendingError::InvalidObligationId);
-
     check_obligation_seeds(
         args.tag,
         &ctx.accounts.seed1_account,
@@ -56,7 +54,9 @@ pub struct InitObligation<'info> {
 
     pub lending_market: AccountLoader<'info, LendingMarket>,
 
+    /// CHECK: Verified in check_obligation_seeds function
     pub seed1_account: AccountInfo<'info>,
+    /// CHECK: Verified in check_obligation_seeds function
     pub seed2_account: AccountInfo<'info>,
 
     #[account(
@@ -84,12 +84,14 @@ pub fn check_obligation_seeds(
             );
         }
         1 => {
+           
             let _mint1_check =
                 Mint::try_deserialize(&mut seed1_account.data.borrow().as_ref()).unwrap();
             let _mint2_check =
                 Mint::try_deserialize(&mut seed2_account.data.borrow().as_ref()).unwrap();
         }
         2 => {
+           
             let _mint_check =
                 Mint::try_deserialize(&mut seed1_account.data.borrow().as_ref()).unwrap();
             require!(
@@ -98,6 +100,7 @@ pub fn check_obligation_seeds(
             )
         }
         3 => {
+           
             let _mint1_check =
                 Mint::try_deserialize(&mut seed1_account.data.borrow().as_ref()).unwrap();
             let _mint2_check =

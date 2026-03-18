@@ -2,10 +2,9 @@ use anchor_lang::{
     accounts::account_loader::AccountLoader,
     err, error,
     prelude::{msg, Context, Pubkey},
-    require_eq, Key, Result, ToAccountInfo,
+    require, require_eq, require_gte, Key, Result, ToAccountInfo,
 };
 
-use crate::utils::constraints;
 use crate::{
     handlers::*,
     state::{
@@ -13,14 +12,16 @@ use crate::{
         WithdrawObligationCollateralAccounts,
         WithdrawObligationCollateralAndRedeemReserveCollateralAccounts,
     },
-    utils::{seeds::BASE_SEED_REFERRER_TOKEN_STATE, FatAccountLoader, PROGRAM_VERSION},
+    utils::{
+        constraints, seeds::BASE_SEED_REFERRER_TOKEN_STATE, FatAccountLoader, PROGRAM_VERSION,
+    },
     LendingAction, LendingError, Obligation, ReferrerTokenState, Reserve, ReserveStatus,
 };
 
-pub fn borrow_obligation_liquidity_checks(ctx: &Context<BorrowObligationLiquidity>) -> Result<()> {
-    let borrow_reserve = &ctx.accounts.borrow_reserve.load()?;
+pub fn borrow_obligation_liquidity_checks(accounts: &BorrowObligationLiquidity) -> Result<()> {
+    let borrow_reserve = &accounts.borrow_reserve.load()?;
 
-    if borrow_reserve.liquidity.supply_vault == ctx.accounts.user_destination_liquidity.key() {
+    if borrow_reserve.liquidity.supply_vault == accounts.user_destination_liquidity.key() {
         msg!(
             "Borrow reserve liquidity supply cannot be used as the destination liquidity provided"
         );
@@ -37,10 +38,73 @@ pub fn borrow_obligation_liquidity_checks(ctx: &Context<BorrowObligationLiquidit
         return err!(LendingError::ReserveDeprecated);
     }
 
-    constraints::token_2022::validate_liquidity_token_extensions(
-        &ctx.accounts.borrow_reserve_liquidity_mint.to_account_info(),
-        &ctx.accounts.user_destination_liquidity.to_account_info(),
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
+        &accounts.borrow_reserve_liquidity_mint.to_account_info(),
+        &accounts.user_destination_liquidity.to_account_info(),
     )?;
+
+    Ok(())
+}
+
+pub fn enqueue_to_withdraw_checks(accounts: &EnqueueToWithdraw) -> Result<()> {
+    let withdraw_reserve = &accounts.reserve.load()?;
+
+    if withdraw_reserve.liquidity.supply_vault == accounts.user_destination_liquidity_ta.key() {
+        msg!(
+            "Withdraw reserve liquidity supply cannot be used as the destination liquidity account"
+        );
+        return err!(LendingError::InvalidAccountInput);
+    }
+
+    if withdraw_reserve.config.status() == ReserveStatus::Obsolete {
+        msg!("Reserve is not active");
+        return err!(LendingError::ReserveObsolete);
+    }
+
+    if withdraw_reserve.version != PROGRAM_VERSION as u64 {
+        msg!("Reserve version does not match the program version");
+        return err!(LendingError::ReserveDeprecated);
+    }
+
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
+        &accounts.reserve_liquidity_mint.to_account_info(),
+        &accounts.user_destination_liquidity_ta.to_account_info(),
+    )?;
+
+    Ok(())
+}
+
+pub fn withdraw_queued_liquidity_checks(accounts: &WithdrawQueuedLiquidity) -> Result<()> {
+    let withdraw_reserve = &accounts.reserve.load()?;
+
+    if withdraw_reserve.liquidity.supply_vault == accounts.user_destination_liquidity.key() {
+        msg!(
+            "Withdraw reserve liquidity supply cannot be used as the destination liquidity account"
+        );
+        return err!(LendingError::InvalidAccountInput);
+    }
+
+    if withdraw_reserve.version != PROGRAM_VERSION as u64 {
+        msg!("Reserve version does not match the program version");
+        return err!(LendingError::ReserveDeprecated);
+    }
+
+   
+
+    Ok(())
+}
+
+pub fn recover_invalid_ticket_collateral_checks(
+    accounts: &RecoverInvalidTicketCollateral,
+) -> Result<()> {
+    let withdraw_reserve = &accounts.reserve.load()?;
+
+    if withdraw_reserve.version != PROGRAM_VERSION as u64 {
+        msg!("Reserve version does not match the program version");
+        return err!(LendingError::ReserveDeprecated);
+    }
+
+   
 
     Ok(())
 }
@@ -92,7 +156,12 @@ pub fn deposit_reserve_liquidity_checks(
         return err!(LendingError::ReserveDeprecated);
     }
 
-    constraints::token_2022::validate_liquidity_token_extensions(
+    require!(
+        !reserve.config.is_ctoken_usage_blocked(),
+        LendingError::CTokenUsageBlocked
+    );
+
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
         &accounts.reserve_liquidity_mint.to_account_info(),
         &accounts.user_source_liquidity.to_account_info(),
     )?;
@@ -120,7 +189,7 @@ pub fn deposit_reserve_liquidity_and_obligation_collateral_checks(
         return err!(LendingError::ReserveDeprecated);
     }
 
-    constraints::token_2022::validate_liquidity_token_extensions(
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
         &accounts.reserve_liquidity_mint.to_account_info(),
         &accounts.user_source_liquidity.to_account_info(),
     )?;
@@ -129,16 +198,16 @@ pub fn deposit_reserve_liquidity_and_obligation_collateral_checks(
 }
 
 pub fn liquidate_obligation_checks(
-    ctx: &Context<LiquidateObligationAndRedeemReserveCollateral>,
+    accounts: &LiquidateObligationAndRedeemReserveCollateral,
 ) -> Result<()> {
-    let repay_reserve = ctx.accounts.repay_reserve.load()?;
-    let withdraw_reserve = ctx.accounts.withdraw_reserve.load()?;
+    let repay_reserve = accounts.repay_reserve.load()?;
+    let withdraw_reserve = accounts.withdraw_reserve.load()?;
 
-    if repay_reserve.liquidity.supply_vault == ctx.accounts.user_source_liquidity.key() {
+    if repay_reserve.liquidity.supply_vault == accounts.user_source_liquidity.key() {
         msg!("Repay reserve liquidity supply cannot be used as the source liquidity provided");
         return err!(LendingError::InvalidAccountInput);
     }
-    if repay_reserve.collateral.supply_vault == ctx.accounts.user_destination_collateral.key() {
+    if repay_reserve.collateral.supply_vault == accounts.user_destination_collateral.key() {
         msg!(
             "Repay reserve collateral supply cannot be used as the destination collateral provided"
         );
@@ -150,11 +219,11 @@ pub fn liquidate_obligation_checks(
         return err!(LendingError::ReserveDeprecated);
     }
 
-    if withdraw_reserve.liquidity.supply_vault == ctx.accounts.user_source_liquidity.key() {
+    if withdraw_reserve.liquidity.supply_vault == accounts.user_source_liquidity.key() {
         msg!("Withdraw reserve liquidity supply cannot be used as the source liquidity provided");
         return err!(LendingError::InvalidAccountInput);
     }
-    if withdraw_reserve.collateral.supply_vault == ctx.accounts.user_destination_collateral.key() {
+    if withdraw_reserve.collateral.supply_vault == accounts.user_destination_collateral.key() {
         msg!("Withdraw reserve collateral supply cannot be used as the destination collateral provided");
         return err!(LendingError::InvalidAccountInput);
     }
@@ -164,16 +233,14 @@ pub fn liquidate_obligation_checks(
         return err!(LendingError::ReserveDeprecated);
     }
 
-    constraints::token_2022::validate_liquidity_token_extensions(
-        &ctx.accounts.repay_reserve_liquidity_mint.to_account_info(),
-        &ctx.accounts.user_source_liquidity.to_account_info(),
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
+        &accounts.repay_reserve_liquidity_mint.to_account_info(),
+        &accounts.user_source_liquidity.to_account_info(),
     )?;
 
-    constraints::token_2022::validate_liquidity_token_extensions(
-        &ctx.accounts
-            .withdraw_reserve_liquidity_mint
-            .to_account_info(),
-        &ctx.accounts.user_destination_liquidity.to_account_info(),
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
+        &accounts.withdraw_reserve_liquidity_mint.to_account_info(),
+        &accounts.user_destination_liquidity.to_account_info(),
     )?;
 
     Ok(())
@@ -186,6 +253,7 @@ pub fn redeem_reserve_collateral_checks(accounts: &RedeemReserveCollateralAccoun
         msg!("Reserve collateral supply cannot be used as the source collateral provided");
         return err!(LendingError::InvalidAccountInput);
     }
+   
     if reserve.liquidity.supply_vault == accounts.user_destination_liquidity.key() {
         msg!("Reserve liquidity supply cannot be used as the destination liquidity provided");
         return err!(LendingError::InvalidAccountInput);
@@ -196,7 +264,7 @@ pub fn redeem_reserve_collateral_checks(accounts: &RedeemReserveCollateralAccoun
         return err!(LendingError::ReserveDeprecated);
     }
 
-    constraints::token_2022::validate_liquidity_token_extensions(
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
         &accounts.reserve_liquidity_mint.to_account_info(),
         &accounts.user_destination_liquidity.to_account_info(),
     )?;
@@ -219,7 +287,7 @@ pub fn withdraw_obligation_collateral_and_redeem_reserve_collateral_checks(
         return err!(LendingError::InvalidAccountInput);
     }
 
-    constraints::token_2022::validate_liquidity_token_extensions(
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
         &accounts.reserve_liquidity_mint.to_account_info(),
         &accounts.user_destination_liquidity.to_account_info(),
     )?;
@@ -227,10 +295,10 @@ pub fn withdraw_obligation_collateral_and_redeem_reserve_collateral_checks(
     Ok(())
 }
 
-pub fn repay_obligation_liquidity_checks(ctx: &Context<RepayObligationLiquidity>) -> Result<()> {
-    let repay_reserve = ctx.accounts.repay_reserve.load()?;
+pub fn repay_obligation_liquidity_checks(accounts: &RepayObligationLiquidity) -> Result<()> {
+    let repay_reserve = accounts.repay_reserve.load()?;
 
-    if repay_reserve.liquidity.supply_vault == ctx.accounts.user_source_liquidity.key() {
+    if repay_reserve.liquidity.supply_vault == accounts.user_source_liquidity.key() {
         msg!("Repay reserve liquidity supply cannot be used as the source liquidity provided");
         return err!(LendingError::InvalidAccountInput);
     }
@@ -240,9 +308,9 @@ pub fn repay_obligation_liquidity_checks(ctx: &Context<RepayObligationLiquidity>
         return err!(LendingError::ReserveDeprecated);
     }
 
-    constraints::token_2022::validate_liquidity_token_extensions(
-        &ctx.accounts.reserve_liquidity_mint.to_account_info(),
-        &ctx.accounts.user_source_liquidity.to_account_info(),
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
+        &accounts.reserve_liquidity_mint.to_account_info(),
+        &accounts.user_source_liquidity.to_account_info(),
     )?;
 
     Ok(())
@@ -257,12 +325,16 @@ pub fn withdraw_obligation_collateral_checks(
         msg!("Reserve version does not match the program version");
         return err!(LendingError::ReserveDeprecated);
     }
-
+   
     if withdraw_reserve.collateral.supply_vault == accounts.user_destination_collateral.key() {
         msg!("Withdraw reserve collateral supply cannot be used as the destination collateral provided");
         return err!(LendingError::InvalidAccountInput);
     }
 
+    require!(
+        !withdraw_reserve.config.is_ctoken_usage_blocked(),
+        LendingError::CTokenUsageBlocked
+    );
     Ok(())
 }
 
@@ -293,7 +365,8 @@ pub fn flash_borrow_reserve_liquidity_checks(
         return err!(LendingError::FlashLoansDisabled);
     }
 
-    constraints::token_2022::validate_liquidity_token_extensions(
+   
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
         &ctx.accounts.reserve_liquidity_mint.to_account_info(),
         &ctx.accounts.user_destination_liquidity.to_account_info(),
     )?;
@@ -315,20 +388,21 @@ pub fn flash_repay_reserve_liquidity_checks(
 }
 
 pub fn refresh_obligation_farms_for_reserve_checks(
-    ctx: &Context<RefreshObligationFarmsForReserve>,
+    accounts: &RefreshObligationFarmsForReserveBase,
 ) -> Result<()> {
-    if !ctx.accounts.obligation.data_is_empty() {
+    if !accounts.obligation.data_is_empty() {
         let obligation_account: FatAccountLoader<Obligation> =
-            FatAccountLoader::try_from(&ctx.accounts.obligation).unwrap();
+            FatAccountLoader::try_from(&accounts.obligation).unwrap();
         let obligation = obligation_account.load()?;
 
-        if obligation.lending_market != ctx.accounts.lending_market.key() {
+        if obligation.lending_market != accounts.lending_market.key() {
             msg!("Obligation lending market does not match the lending market provided");
-            return err!(LendingError::InvalidAccountInput);
+            return Err(error!(LendingError::InvalidAccountInput)
+                .with_pubkeys((obligation.lending_market, accounts.lending_market.key())));
         }
     }
 
-    let reserve = ctx.accounts.reserve.load()?;
+    let reserve = accounts.reserve.load()?;
 
     if reserve.config.status() == ReserveStatus::Obsolete {
         msg!("Reserve is not active");
@@ -349,8 +423,8 @@ pub fn initial_liquidation_reserve_liquidity_available_amount(
 ) -> (u64, u64) {
     let repay_reserve = repay_reserve.load().unwrap();
     let withdraw_reserve = withdraw_reserve.load().unwrap();
-    let repay_reserve_liquidity = repay_reserve.liquidity.available_amount;
-    let withdraw_reserve_liquidity = withdraw_reserve.liquidity.available_amount;
+    let repay_reserve_liquidity = repay_reserve.total_available_liquidity_amount();
+    let withdraw_reserve_liquidity = withdraw_reserve.total_available_liquidity_amount();
 
     (repay_reserve_liquidity, withdraw_reserve_liquidity)
 }
@@ -406,22 +480,62 @@ pub fn post_transfer_vault_balance_liquidity_reserve_checks(
                 LendingError::ReserveAccountingMismatch
             );
         }
-        LendingAction::SubstractiveSigned(amount_transferred) => {
-            let expected_reserve_vault_balance =
-                u64::try_from(initial_reserve_vault_balance as i64 - amount_transferred)
-                    .map_err(|_| LendingError::MathOverflow)?;
+    }
+
+    Ok(())
+}
+
+pub fn post_transfer_owner_queued_collateral_vault_balance_checks(
+    final_owner_queued_collateral_vault_balance: u64,
+    final_queued_collateral: u64,
+    initial_owner_queued_collateral_vault_balance: u64,
+    initial_queued_collateral: u64,
+    action_type: LendingAction,
+) -> anchor_lang::Result<()> {
+   
+   
+   
+    let pre_transfer_collateral_diff = i128::from(initial_owner_queued_collateral_vault_balance)
+        - i128::from(initial_queued_collateral);
+    let post_transfer_collateral_diff = i128::from(final_owner_queued_collateral_vault_balance)
+        - i128::from(final_queued_collateral);
+
+    require_eq!(
+        pre_transfer_collateral_diff,
+        post_transfer_collateral_diff,
+        LendingError::ReserveTokenBalanceMismatch
+    );
+
+    match action_type {
+        LendingAction::Additive(amount_transferred) => {
+            let expected_owner_queued_collateral_vault_balance =
+                initial_owner_queued_collateral_vault_balance + amount_transferred;
             require_eq!(
-                expected_reserve_vault_balance,
-                final_reserve_vault_balance,
+                expected_owner_queued_collateral_vault_balance,
+                final_owner_queued_collateral_vault_balance,
+                LendingError::ReserveVaultBalanceMismatch,
+            );
+
+            let expected_queued_collateral = initial_queued_collateral + amount_transferred;
+            require_eq!(
+                expected_queued_collateral,
+                final_queued_collateral,
+                LendingError::ReserveAccountingMismatch
+            );
+        }
+        LendingAction::Subtractive(amount_transferred) => {
+            let expected_owner_queued_collateral_vault_balance =
+                initial_owner_queued_collateral_vault_balance - amount_transferred;
+            require_eq!(
+                expected_owner_queued_collateral_vault_balance,
+                final_owner_queued_collateral_vault_balance,
                 LendingError::ReserveVaultBalanceMismatch
             );
 
-            let expected_reserve_available_liquidity =
-                u64::try_from(initial_reserve_available_liquidity as i64 - amount_transferred)
-                    .map_err(|_| LendingError::MathOverflow)?;
+            let expected_queued_collateral = initial_queued_collateral - amount_transferred;
             require_eq!(
-                expected_reserve_available_liquidity,
-                final_reserve_available_liquidity,
+                expected_queued_collateral,
+                final_queued_collateral,
                 LendingError::ReserveAccountingMismatch
             );
         }
@@ -430,13 +544,54 @@ pub fn post_transfer_vault_balance_liquidity_reserve_checks(
     Ok(())
 }
 
+pub fn post_ticket_collateral_recovery_owner_queued_collateral_vault_balance_checks(
+    final_owner_queued_collateral_vault_balance: u64,
+    final_user_source_collateral_balance: u64,
+    initial_owner_queued_collateral_vault_balance: u64,
+    initial_user_source_collateral_balance: u64,
+    amount_transferred_from_vault_to_user: u64,
+) -> anchor_lang::Result<()> {
+   
+   
+   
+   
+
+    let expected_owner_queued_collateral_vault_balance =
+        initial_owner_queued_collateral_vault_balance - amount_transferred_from_vault_to_user;
+    require_eq!(
+        expected_owner_queued_collateral_vault_balance,
+        final_owner_queued_collateral_vault_balance,
+        LendingError::ReserveVaultBalanceMismatch,
+    );
+
+    let expected_user_source_collateral_balance =
+        initial_user_source_collateral_balance + amount_transferred_from_vault_to_user;
+    require_eq!(
+        expected_user_source_collateral_balance,
+        final_user_source_collateral_balance,
+        LendingError::UserTokenBalanceMismatch,
+    );
+
+    Ok(())
+}
+
+pub fn post_liquidate_repay_amount_check(max_repay: u64, actual_repay: u64) -> Result<()> {
+    require_gte!(
+        max_repay,
+        actual_repay,
+        LendingError::InsufficientRepayAmount
+    );
+    Ok(())
+}
+
 pub fn validate_referrer_token_state(
+    program_id: &Pubkey,
     referrer_token_state: &ReferrerTokenState,
     referrer_token_state_key: Pubkey,
     mint: Pubkey,
     owner_referrer: Pubkey,
     reserve_key: Pubkey,
-) -> anchor_lang::Result<()> {
+) -> Result<()> {
     if referrer_token_state.mint == Pubkey::default()
         || referrer_token_state.referrer == Pubkey::default()
     {
@@ -454,7 +609,7 @@ pub fn validate_referrer_token_state(
             reserve_key.as_ref(),
             &[referrer_token_state.bump.try_into().unwrap()],
         ],
-        &crate::ID,
+        program_id,
     )
     .unwrap();
 

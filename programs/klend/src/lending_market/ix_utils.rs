@@ -7,7 +7,8 @@ use anchor_lang::{
     Result,
 };
 
-use crate::utils::CPI_WHITELISTED_ACCOUNTS;
+use crate::utils::{CPI_WHITELISTED_ACCOUNTS, RESTRICTED_PROGRAMS};
+
 
 pub trait InstructionLoader {
     fn load_instruction_at(&self, index: usize) -> std::result::Result<Instruction, ProgramError>;
@@ -15,9 +16,21 @@ pub trait InstructionLoader {
     fn load_current_index(&self) -> std::result::Result<u16, ProgramError>;
 
     fn is_flash_forbidden_cpi_call(&self) -> Result<bool> {
+       
+       
+       
+       
+       
+       
+       
+       
+       
+
         let current_index = self.load_current_index()? as usize;
         let current_ixn = self.load_instruction_at(current_index)?;
 
+       
+       
         if crate::ID != current_ixn.program_id {
             return Ok(true);
         }
@@ -29,9 +42,20 @@ pub trait InstructionLoader {
     }
 
     fn is_forbidden_cpi_call(&self) -> Result<bool> {
+       
+       
+       
+       
+       
+       
+       
+       
+       
         let current_index = self.load_current_index()? as usize;
         let current_ixn = self.load_instruction_at(current_index)?;
 
+       
+       
         if crate::ID != current_ixn.program_id {
             let whitelisted_account = CPI_WHITELISTED_ACCOUNTS
                 .iter()
@@ -39,6 +63,7 @@ pub trait InstructionLoader {
 
             match whitelisted_account {
                 Some(whitelisted_account) => {
+                   
                     if get_stack_height()
                         > (TRANSACTION_LEVEL_STACK_HEIGHT + whitelisted_account.whitelist_level)
                     {
@@ -47,6 +72,7 @@ pub trait InstructionLoader {
                         Ok(false)
                     }
                 }
+               
                 None => Ok(true),
             }
         } else if get_stack_height() > TRANSACTION_LEVEL_STACK_HEIGHT {
@@ -55,10 +81,33 @@ pub trait InstructionLoader {
             Ok(false)
         }
     }
+
+    fn tx_includes_restricted_programs(&self) -> Result<bool> {
+        let ix_iterator = IxIterator::new_at(0, self);
+
+        for ix_result in ix_iterator {
+            let ix = ix_result?;
+            if RESTRICTED_PROGRAMS.contains(&ix.program_id) {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
 }
 
 pub struct BpfInstructionLoader<'a, 'info> {
     pub instruction_sysvar_account_info: &'a AccountInfo<'info>,
+}
+
+impl BpfInstructionLoader<'_, '_> {
+    pub fn new<'a, 'info>(
+        instruction_sysvar_account_info: &'a AccountInfo<'info>,
+    ) -> BpfInstructionLoader<'a, 'info> {
+        BpfInstructionLoader {
+            instruction_sysvar_account_info,
+        }
+    }
 }
 
 impl<'a, 'info> InstructionLoader for BpfInstructionLoader<'a, 'info> {
@@ -71,12 +120,12 @@ impl<'a, 'info> InstructionLoader for BpfInstructionLoader<'a, 'info> {
     }
 }
 
-pub struct IxIterator<'a, IxLoader: InstructionLoader> {
+pub struct IxIterator<'a, IxLoader: InstructionLoader + ?Sized> {
     current_ix_index: usize,
     instruction_loader: &'a IxLoader,
 }
 
-impl<'a, IxLoader> IxIterator<'a, IxLoader>
+impl<'a, IxLoader: ?Sized> IxIterator<'a, IxLoader>
 where
     IxLoader: InstructionLoader,
 {
@@ -88,7 +137,7 @@ where
     }
 }
 
-impl<IxLoader> Iterator for IxIterator<'_, IxLoader>
+impl<IxLoader: ?Sized> Iterator for IxIterator<'_, IxLoader>
 where
     IxLoader: InstructionLoader,
 {
@@ -108,3 +157,11 @@ where
         }
     }
 }
+
+pub fn no_restricted_programs_within_tx(
+    instruction_sysvar_account_info: &AccountInfo,
+) -> Result<bool> {
+    let instruction_loader = BpfInstructionLoader::new(instruction_sysvar_account_info);
+    Ok(!instruction_loader.tx_includes_restricted_programs()?)
+}
+

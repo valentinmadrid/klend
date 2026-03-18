@@ -82,7 +82,7 @@ pub fn process(ctx: Context<RefreshReservesBatch>, skip_price_updates: bool) -> 
                     switchboard_price_oracle,
                     switchboard_twap_oracle,
                     scope_prices,
-                    clock.unix_timestamp,
+                    clock,
                 )?
             } else {
                 None
@@ -97,13 +97,14 @@ pub fn process(ctx: Context<RefreshReservesBatch>, skip_price_updates: bool) -> 
             price_res,
             lending_market.referral_fee_bps,
         )?;
-        lending_operations::refresh_reserve_limit_timestamps(reserve, clock.slot)?;
+        let timestamp = u64::try_from(clock.unix_timestamp).unwrap();
+        lending_operations::refresh_reserve_limit_timestamps(reserve, timestamp);
 
         if !skip_price_updates {
             msg!(
                 "Token: {} Price: {}",
                 &reserve.config.token_info.symbol(),
-                reserve.liquidity.get_market_price_f().to_display()
+                reserve.liquidity.get_market_price().to_display()
             );
         }
     }
@@ -112,4 +113,17 @@ pub fn process(ctx: Context<RefreshReservesBatch>, skip_price_updates: bool) -> 
 }
 
 #[derive(Accounts)]
-pub struct RefreshReservesBatch {}
+pub struct RefreshReservesBatch {
+   
+   
+   
+   
+   
+   
+   
+   
+   
+
+   
+   
+}

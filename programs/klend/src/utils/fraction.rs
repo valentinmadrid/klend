@@ -9,10 +9,12 @@ use crate::LendingError;
 mod uint_types {
     use uint::construct_uint;
     construct_uint! {
-               pub struct U256(4);
+
+        pub struct U256(4);
     }
     construct_uint! {
-               pub struct U128(2);
+
+        pub struct U128(2);
     }
 }
 
@@ -20,11 +22,17 @@ pub use uint_types::{U128, U256};
 
 pub const FRACTION_ONE_SCALED: u128 = Fraction::ONE.to_bits();
 
+pub const EPSILON: Fraction = Fraction::from_bits(1_000_000);
+
+
+
 pub fn pow_fraction(fraction: Fraction, power: u32) -> Option<Fraction> {
     if power == 0 {
         return Some(Fraction::ONE);
     }
 
+   
+   
     let mut x = fraction;
     let mut y = Fraction::ONE;
     let mut n = power;
@@ -40,19 +48,23 @@ pub fn pow_fraction(fraction: Fraction, power: u32) -> Option<Fraction> {
     x.checked_mul(y)
 }
 
+
 #[inline]
 pub const fn bps_u128_to_fraction(bps: u128) -> Fraction {
     if bps == 10_000 {
         return Fraction::ONE;
     }
+   
     Fraction::const_from_int(bps).unwrapped_div_int(10_000)
 }
+
 
 #[inline]
 pub const fn pct_u128_to_fraction(percent: u128) -> Fraction {
     if percent == 100 {
         return Fraction::ONE;
     }
+   
     Fraction::const_from_int(percent).unwrapped_div_int(100)
 }
 
@@ -67,10 +79,21 @@ pub trait FractionExtra {
 
     fn mul_int_ratio(&self, numerator: impl Into<u128>, denominator: impl Into<u128>) -> Self;
     fn full_mul_int_ratio(&self, numerator: impl Into<U256>, denominator: impl Into<U256>) -> Self;
+    fn full_mul_int_ratio_ceil(
+        &self,
+        numerator: impl Into<U256>,
+        denominator: impl Into<U256>,
+    ) -> Self;
+
+    fn div_ceil(&self, denominator: &Self) -> Self;
 
     fn to_floor<Dst: FromFixed>(&self) -> Dst;
     fn to_ceil<Dst: FromFixed>(&self) -> Dst;
     fn to_round<Dst: FromFixed>(&self) -> Dst;
+
+    fn try_to_floor<Dst: FromFixed>(&self) -> Option<Dst>;
+    fn try_to_ceil<Dst: FromFixed>(&self) -> Option<Dst>;
+    fn try_to_round<Dst: FromFixed>(&self) -> Option<Dst>;
 
     fn to_sf(&self) -> u128;
     fn from_sf(sf: u128) -> Self;
@@ -81,12 +104,14 @@ pub trait FractionExtra {
 impl FractionExtra for Fraction {
     #[inline]
     fn to_percent<Dst: FromFixed>(&self) -> Option<Dst> {
-        (self * 100).round().checked_to_num()
+        self.checked_mul(fraction!(100))?.round().checked_to_num()
     }
 
     #[inline]
     fn to_bps<Dst: FromFixed>(&self) -> Option<Dst> {
-        (self * 10_000).round().checked_to_num()
+        self.checked_mul(fraction!(10_000))?
+            .round()
+            .checked_to_num()
     }
 
     #[inline]
@@ -104,7 +129,7 @@ impl FractionExtra for Fraction {
     #[inline]
     fn checked_pow(&self, power: u32) -> Option<Self>
     where
-        Self: std::marker::Sized,
+        Self: Sized,
     {
         pow_fraction(*self, power)
     }
@@ -129,6 +154,32 @@ impl FractionExtra for Fraction {
     }
 
     #[inline]
+    fn full_mul_int_ratio_ceil(
+        &self,
+        numerator: impl Into<U256>,
+        denominator: impl Into<U256>,
+    ) -> Self {
+        let numerator = numerator.into();
+        let denominator = denominator.into();
+        let big_sf = U256::from(self.to_bits());
+        let big_sf_res = (big_sf * numerator + denominator - 1) / denominator;
+        let sf_res: u128 = big_sf_res
+            .try_into()
+            .expect("Denominator is not big enough, the result doesn't fit in a Fraction.");
+        Fraction::from_bits(sf_res)
+    }
+
+    #[inline]
+    fn div_ceil(&self, denum: &Self) -> Self {
+        let num_sf = self.to_bits();
+        let denum_sf = denum.to_bits();
+        let res_sf_u256 =
+            ((U256::from(num_sf) << Self::FRAC_NBITS) + U256::from(denum_sf - 1)) / denum_sf;
+        let res_sf = u128::try_from(res_sf_u256).expect("Overflow in div_ceil");
+        Self::from_bits(res_sf)
+    }
+
+    #[inline]
     fn to_floor<Dst: FromFixed>(&self) -> Dst {
         self.floor().to_num()
     }
@@ -141,6 +192,18 @@ impl FractionExtra for Fraction {
     #[inline]
     fn to_round<Dst: FromFixed>(&self) -> Dst {
         self.round().to_num()
+    }
+
+    fn try_to_floor<Dst: FromFixed>(&self) -> Option<Dst> {
+        self.floor().checked_to_num()
+    }
+
+    fn try_to_ceil<Dst: FromFixed>(&self) -> Option<Dst> {
+        self.ceil().checked_to_num()
+    }
+
+    fn try_to_round<Dst: FromFixed>(&self) -> Option<Dst> {
+        self.round().checked_to_num()
     }
 
     #[inline]
@@ -166,6 +229,8 @@ pub fn to_sf<Src: ToFixed>(src: Src) -> u128 {
 pub const fn to_sf_const(src: u128) -> u128 {
     Fraction::const_from_int(src).to_bits()
 }
+
+
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, PartialOrd, Ord)]
 pub struct BigFraction(pub U256);
@@ -202,22 +267,25 @@ impl BigFraction {
         Self(U256(bits))
     }
 
-    pub fn to_u128_sf(&self) -> u128 {
-        let v = self.0 .0;
-        let low = v[0] as u128;
-        let high = v[1] as u128;
-        (high << 64) | low
-    }
-
     pub fn from_num<T>(num: T) -> Self
     where
         T: Into<U256>,
     {
         let value: U256 = num.into();
-        let sf = value << Fraction::FRAC_NBITS;
+        let sf = panicking_shl(value, Fraction::FRAC_NBITS);
         Self(sf)
     }
+
+
+    pub fn div_ceil(self, rhs: impl Into<BigFraction>) -> Self {
+        let extra_scaled = panicking_shl(self.0, Fraction::FRAC_NBITS);
+        let rhs_scaled = rhs.into().0;
+        let res = (extra_scaled + rhs_scaled - 1) / rhs_scaled;
+        Self(res)
+    }
 }
+
+
 
 use std::{
     fmt::Display,
@@ -272,8 +340,18 @@ impl Div for BigFraction {
     type Output = Self;
 
     fn div(self, rhs: Self) -> Self::Output {
-        let extra_scaled = self.0 << Fraction::FRAC_NBITS;
+        let extra_scaled = panicking_shl(self.0, Fraction::FRAC_NBITS);
         let res = extra_scaled / rhs.0;
+        Self(res)
+    }
+}
+
+impl Div<Fraction> for BigFraction {
+    type Output = Self;
+
+    fn div(self, rhs: Fraction) -> Self::Output {
+        let extra_scaled = panicking_shl(self.0, Fraction::FRAC_NBITS);
+        let res = extra_scaled / rhs.to_bits();
         Self(res)
     }
 }
@@ -345,20 +423,48 @@ impl TryFrom<U256> for U128 {
     }
 }
 
+
+
+
 pub struct FractionDisplay<'a>(&'a Fraction);
 
 impl Display for FractionDisplay<'_> {
     fn fmt(&self, formater: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let sf = self.0.to_bits();
 
+       
         const ROUND_COMP: u128 = (1 << Fraction::FRAC_NBITS) / (10_000 * 2);
         let sf = sf + ROUND_COMP;
 
+       
         let i = sf >> Fraction::FRAC_NBITS;
 
+       
         const FRAC_MASK: u128 = (1 << Fraction::FRAC_NBITS) - 1;
         let f_p = (sf & FRAC_MASK) as u64;
+       
         let f_p = ((f_p >> 30) * 10_000) >> 30;
         write!(formater, "{i}.{f_p:0>4}")
     }
 }
+
+impl std::fmt::Debug for FractionDisplay<'_> {
+    fn fmt(&self, formater: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formater, "{}", self)
+    }
+}
+
+
+
+
+
+fn panicking_shl(number: U256, bit_count: u32) -> U256 {
+    let result = number << bit_count;
+    let recovered_number = result >> bit_count;
+    if recovered_number != number {
+        panic!("Cannot shift {} left by {} bits", number, bit_count);
+    }
+    result
+}
+
+

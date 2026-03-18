@@ -1,12 +1,12 @@
 use anchor_lang::{prelude::*, Accounts};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::utils::constraints;
 use crate::{
     gen_signer_seeds,
     lending_market::lending_operations,
     state::{LendingMarket, Reserve},
     utils::{
+        constraints,
         seeds::{self, BASE_SEED_REFERRER_TOKEN_STATE},
         token_transfer,
     },
@@ -14,7 +14,7 @@ use crate::{
 };
 
 pub fn process(ctx: Context<WithdrawReferrerFees>) -> Result<()> {
-    constraints::token_2022::validate_liquidity_token_extensions(
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
         &ctx.accounts.reserve_liquidity_mint.to_account_info(),
         &ctx.accounts.referrer_token_account.to_account_info(),
     )?;
@@ -31,6 +31,8 @@ pub fn process(ctx: Context<WithdrawReferrerFees>) -> Result<()> {
 
     let withdraw_amount =
         lending_operations::withdraw_referrer_fees(reserve, clock.slot, referrer_token_state)?;
+
+    msg!("Withdrawing referrer fees: {}", withdraw_amount);
 
     token_transfer::withdraw_fees_from_reserve(
         ctx.accounts.token_program.to_account_info(),
@@ -62,7 +64,7 @@ pub struct WithdrawReferrerFees<'info> {
     )]
     pub reserve: AccountLoader<'info, Reserve>,
 
-    #[account(mut,
+    #[account(
         address = reserve.load()?.liquidity.mint_pubkey,
         mint::token_program = token_program,
     )]
@@ -77,6 +79,7 @@ pub struct WithdrawReferrerFees<'info> {
     pub referrer_token_account: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub lending_market: AccountLoader<'info, LendingMarket>,
+    /// CHECK: Verified through create_program_address
     #[account(
         seeds = [seeds::LENDING_MARKET_AUTH, lending_market.key().as_ref()],
         bump = lending_market.load()?.bump_seed as u8,

@@ -1,15 +1,21 @@
-use anchor_lang::{prelude::*, Accounts};
-use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::utils::constraints;
+
+
+use anchor_lang::{prelude::*, solana_program::program_option::COption, Accounts};
+use anchor_spl::{
+    associated_token::get_associated_token_address_with_program_id,
+    token_interface::{Mint, TokenAccount, TokenInterface},
+};
+
 use crate::{
     gen_signer_seeds,
     state::{LendingMarket, Reserve},
-    utils::{seeds, token_transfer},
+    utils::{constraints, seeds, token_transfer},
+    GlobalConfig,
 };
 
 pub fn process(ctx: Context<WithdrawProtocolFees>, amount: u64) -> Result<()> {
-    constraints::token_2022::validate_liquidity_token_extensions(
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
         &ctx.accounts.reserve_liquidity_mint.to_account_info(),
         &ctx.accounts.fee_vault.to_account_info(),
     )?;
@@ -27,7 +33,7 @@ pub fn process(ctx: Context<WithdrawProtocolFees>, amount: u64) -> Result<()> {
         ctx.accounts.token_program.to_account_info(),
         ctx.accounts.reserve_liquidity_mint.to_account_info(),
         ctx.accounts.fee_vault.to_account_info(),
-        ctx.accounts.lending_market_owner_ata.to_account_info(),
+        ctx.accounts.fee_collector_ata.to_account_info(),
         ctx.accounts.lending_market_authority.to_account_info(),
         authority_signer_seeds,
         amount,
@@ -39,9 +45,13 @@ pub fn process(ctx: Context<WithdrawProtocolFees>, amount: u64) -> Result<()> {
 
 #[derive(Accounts)]
 pub struct WithdrawProtocolFees<'info> {
-    pub lending_market_owner: Signer<'info>,
+    #[account(
+        seeds = [seeds::GLOBAL_CONFIG_STATE],
+        bump,
+    )]
+    global_config: AccountLoader<'info, GlobalConfig>,
 
-    #[account(has_one = lending_market_owner)]
+    #[account()]
     pub lending_market: AccountLoader<'info, LendingMarket>,
 
     #[account(
@@ -49,7 +59,7 @@ pub struct WithdrawProtocolFees<'info> {
     )]
     pub reserve: AccountLoader<'info, Reserve>,
 
-    #[account(mut,
+    #[account(
         address = reserve.load()?.liquidity.mint_pubkey,
         mint::token_program = token_program,
     )]
@@ -59,6 +69,7 @@ pub struct WithdrawProtocolFees<'info> {
         seeds = [seeds::LENDING_MARKET_AUTH, lending_market.key().as_ref()],
         bump = lending_market.load()?.bump_seed as u8,
     )]
+    /// CHECK: PDA signer, checked with the provided seeds
     pub lending_market_authority: AccountInfo<'info>,
 
     #[account(mut,
@@ -68,9 +79,15 @@ pub struct WithdrawProtocolFees<'info> {
     pub fee_vault: Box<InterfaceAccount<'info, TokenAccount>>,
 
     #[account(mut,
-        token::mint = reserve.load()?.liquidity.mint_pubkey,
+        address = get_associated_token_address_with_program_id(&global_config.load()?.fee_collector,
+        &reserve_liquidity_mint.key(),
+        &token_program.key(),
+        ),
+        token::mint = reserve_liquidity_mint,
+        token::authority = global_config.load()?.fee_collector,
+        constraint = fee_collector_ata.delegate == COption::None,
     )]
-    pub lending_market_owner_ata: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub fee_collector_ata: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub token_program: Interface<'info, TokenInterface>,
 }
@@ -78,14 +95,14 @@ pub struct WithdrawProtocolFees<'info> {
 impl Clone for crate::accounts::WithdrawProtocolFees {
     fn clone(&self) -> Self {
         Self {
-            lending_market_owner: self.lending_market_owner,
             lending_market: self.lending_market,
             reserve: self.reserve,
             reserve_liquidity_mint: self.reserve_liquidity_mint,
             lending_market_authority: self.lending_market_authority,
             fee_vault: self.fee_vault,
-            lending_market_owner_ata: self.lending_market_owner_ata,
             token_program: self.token_program,
+            fee_collector_ata: self.fee_collector_ata,
+            global_config: self.global_config,
         }
     }
 }

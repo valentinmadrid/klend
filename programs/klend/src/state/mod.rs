@@ -1,14 +1,21 @@
+pub mod borrow_order_operations;
+pub mod events;
+pub mod global_config;
 pub mod last_update;
 pub mod lending_market;
 pub mod liquidation_operations;
 pub mod nested_accounts;
 pub mod obligation;
+pub mod obligation_order_operations;
 pub mod referral;
 pub mod reserve;
 pub mod token_info;
 pub mod types;
+pub mod withdraw_ticket;
 
 use anchor_lang::prelude::*;
+pub use events::*;
+pub use global_config::*;
 pub use last_update::*;
 pub use lending_market::*;
 pub use nested_accounts::*;
@@ -24,10 +31,13 @@ pub use types::*;
 
 use crate::utils::{borrow_rate_curve::BorrowRateCurve, RESERVE_CONFIG_SIZE};
 
+
+
 pub const VALUE_BYTE_ARRAY_LEN_RESERVE: usize = RESERVE_CONFIG_SIZE;
 pub const VALUE_BYTE_ARRAY_LEN_SHORT_UPDATE: usize = 32;
 
 pub const VALUE_BYTE_MAX_ARRAY_LEN_MARKET_UPDATE: usize = 72;
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum UpdateReserveConfigValue {
     Bool(bool),
@@ -90,9 +100,9 @@ pub enum UpdateConfigMode {
     UpdateLiquidationThresholdPct = 3,
     UpdateProtocolLiquidationFee = 4,
     UpdateProtocolTakeRate = 5,
-    UpdateFeesBorrowFee = 6,
+    UpdateFeesOriginationFee = 6,
     UpdateFeesFlashLoanFee = 7,
-    UpdateFeesReferralFeeBps = 8,
+    DeprecatedUpdateFeesReferralFeeBps = 8,
     UpdateDepositLimit = 9,
     UpdateBorrowLimit = 10,
     UpdateTokenInfoLowerHeuristic = 11,
@@ -109,29 +119,37 @@ pub enum UpdateConfigMode {
     UpdateSwitchboardFeed = 22,
     UpdateSwitchboardTwapFeed = 23,
     UpdateBorrowRateCurve = 24,
-    UpdateEntireReserveConfig = 25,
+    DeprecatedUpdateEntireReserveConfig = 25,
     UpdateDebtWithdrawalCap = 26,
     UpdateDepositWithdrawalCap = 27,
-    UpdateDebtWithdrawalCapCurrentTotal = 28,
-    UpdateDepositWithdrawalCapCurrentTotal = 29,
+    DeprecatedUpdateDebtWithdrawalCapCurrentTotal = 28,
+    DeprecatedUpdateDepositWithdrawalCapCurrentTotal = 29,
     UpdateBadDebtLiquidationBonusBps = 30,
     UpdateMinLiquidationBonusBps = 31,
-    DeleveragingMarginCallPeriod = 32,
+    UpdateDeleveragingMarginCallPeriod = 32,
     UpdateBorrowFactor = 33,
-    UpdateAssetTier = 34,
+    DeprecatedUpdateAssetTier = 34,
     UpdateElevationGroup = 35,
-    DeleveragingThresholdSlotsPerBps = 36,
+    UpdateDeleveragingThresholdDecreaseBpsPerDay = 36,
     DeprecatedUpdateMultiplierSideBoost = 37,
     DeprecatedUpdateMultiplierTagBoost = 38,
     UpdateReserveStatus = 39,
     UpdateFarmCollateral = 40,
     UpdateFarmDebt = 41,
     UpdateDisableUsageAsCollateralOutsideEmode = 42,
-    UpdateBlockBorrowingAboveUtilization = 43,
+    UpdateBlockBorrowingAboveUtilizationPct = 43,
     UpdateBlockPriceUsage = 44,
     UpdateBorrowLimitOutsideElevationGroup = 45,
     UpdateBorrowLimitsInElevationGroupAgainstThisReserve = 46,
     UpdateHostFixedInterestRateBps = 47,
+    UpdateAutodeleverageEnabled = 48,
+    UpdateDeleveragingBonusIncreaseBpsPerDay = 49,
+    UpdateProtocolOrderExecutionFee = 50,
+    UpdateProposerAuthorityLock = 51,
+    UpdateMinDeleveragingBonusBps = 52,
+    UpdateBlockCTokenUsage = 53,
+    UpdateDebtMaturityTimestamp = 54,
+    UpdateDebtTermSeconds = 55,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, PartialEq, Eq, Clone, Debug)]
@@ -144,6 +162,7 @@ pub enum UpdateLendingMarketConfigValue {
     U128(u128),
     Pubkey(Pubkey),
     ElevationGroup(ElevationGroup),
+    Name([u8; 32]),
 }
 
 impl UpdateLendingMarketConfigValue {
@@ -152,37 +171,33 @@ impl UpdateLendingMarketConfigValue {
         match self {
             UpdateLendingMarketConfigValue::Bool(v) => {
                 val[0] = *v as u8;
-                val
             }
             UpdateLendingMarketConfigValue::U8(v) => {
                 val[0] = *v;
-                val
             }
             UpdateLendingMarketConfigValue::U16(v) => {
                 val[..2].copy_from_slice(&v.to_le_bytes());
-                val
             }
             UpdateLendingMarketConfigValue::U64(v) => {
                 val[..8].copy_from_slice(&v.to_le_bytes());
-                val
             }
             UpdateLendingMarketConfigValue::U128(v) => {
                 val[..16].copy_from_slice(&v.to_le_bytes());
-                val
             }
             UpdateLendingMarketConfigValue::Pubkey(v) => {
                 val[..32].copy_from_slice(v.as_ref());
-                val
             }
             UpdateLendingMarketConfigValue::ElevationGroup(v) => {
                 val[..72].copy_from_slice(v.try_to_vec().unwrap().as_slice());
-                val
             }
             UpdateLendingMarketConfigValue::U8Array(value) => {
                 val[..8].copy_from_slice(value);
-                val
+            }
+            UpdateLendingMarketConfigValue::Name(v) => {
+                val[..v.len()].copy_from_slice(v);
             }
         }
+        val
     }
 }
 
@@ -197,15 +212,16 @@ impl UpdateLendingMarketConfigValue {
     Copy,
     Debug,
 )]
+#[cfg_attr(feature = "serde", derive(EnumIter))]
 #[repr(u64)]
 pub enum UpdateLendingMarketMode {
     UpdateOwner = 0,
     UpdateEmergencyMode = 1,
     UpdateLiquidationCloseFactor = 2,
     UpdateLiquidationMaxValue = 3,
-    UpdateGlobalUnhealthyBorrow = 4,
+    DeprecatedUpdateGlobalUnhealthyBorrow = 4,
     UpdateGlobalAllowedBorrow = 5,
-    UpdateRiskCouncil = 6,
+    UpdateEmergencyCouncil = 6,
     UpdateMinFullLiquidationThreshold = 7,
     UpdateInsolvencyRiskLtv = 8,
     UpdateElevationGroup = 9,
@@ -215,8 +231,68 @@ pub enum UpdateLendingMarketMode {
     UpdateAutodeleverageEnabled = 13,
     UpdateBorrowingDisabled = 14,
     UpdateMinNetValueObligationPostAction = 15,
-    UpdateMinValueSkipPriorityLiqCheck = 16,
-    UpdatePaddingFields = 17,
+    UpdateMinValueLtvSkipPriorityLiqCheck = 16,
+    UpdateMinValueBfSkipPriorityLiqCheck = 17,
+    UpdatePaddingFields = 18,
+    UpdateName = 19,
+    UpdateIndividualAutodeleverageMarginCallPeriodSecs = 20,
+    UpdateInitialDepositAmount = 21,
+    UpdateObligationOrderExecutionEnabled = 22,
+    UpdateImmutableFlag = 23,
+    UpdateObligationOrderCreationEnabled = 24,
+    UpdateProposerAuthority = 25,
+    UpdatePriceTriggeredLiquidationDisabled = 26,
+    UpdateMatureReserveDebtLiquidationEnabled = 27,
+    UpdateObligationBorrowDebtTermLiquidationEnabled = 28,
+    UpdateBorrowOrderCreationEnabled = 29,
+    UpdateBorrowOrderExecutionEnabled = 30,
+    UpdateMinBorrowOrderFillValue = 31,
+    UpdateWithdrawTicketIssuanceEnabled = 32,
+    UpdateWithdrawTicketRedemptionEnabled = 33,
+    UpdateMinWithdrawQueuedLiquidityValue = 34,
+    UpdateFixedRolloverWindowDurationSeconds = 35,
+    UpdateVariableRolloverWindowDurationSeconds = 36,
+    UpdateObligationBorrowRolloverConfigurationEnabled = 37,
+}
+
+#[cfg(feature = "serde")]
+pub mod serde_iter {
+    use strum::IntoEnumIterator;
+
+    use super::*;
+
+
+
+    const PRIORITIZED_UPDATE_MODES: &[UpdateLendingMarketMode] = &[
+        UpdateLendingMarketMode::UpdateMinWithdrawQueuedLiquidityValue,
+        UpdateLendingMarketMode::UpdateMinBorrowOrderFillValue,
+    ];
+
+    impl UpdateLendingMarketMode {
+
+
+        pub fn iter_for_batch_update() -> impl Iterator<Item = Self> {
+            let non_prioritized_update_modes =
+                Self::iter().filter(|mode| !mode.is_deprecated() && !mode.is_prioritized());
+            PRIORITIZED_UPDATE_MODES
+                .iter()
+                .cloned()
+                .chain(non_prioritized_update_modes)
+        }
+
+        pub fn is_deprecated(&self) -> bool {
+            matches!(
+                *self,
+                UpdateLendingMarketMode::DeprecatedUpdateMultiplierPoints
+                    | UpdateLendingMarketMode::DeprecatedUpdateGlobalUnhealthyBorrow
+            )
+        }
+
+
+        pub fn is_prioritized(&self) -> bool {
+            PRIORITIZED_UPDATE_MODES.contains(self)
+        }
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -286,3 +362,4 @@ pub mod serde_bool_u8 {
         Ok(s as u8)
     }
 }
+

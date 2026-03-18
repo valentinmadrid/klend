@@ -12,6 +12,13 @@ macro_rules! gen_signer_seeds {
 }
 
 #[macro_export]
+macro_rules! gen_reserve_token_account_signer_seeds {
+    ($seeds_tag: expr, $reserve_key: expr, $bump: expr) => {
+        &[$seeds_tag.as_ref(), $reserve_key.as_ref(), &[$bump]]
+    };
+}
+
+#[macro_export]
 macro_rules! try_block {
     ($($expr:expr)*) => {
         match $($expr)* {
@@ -34,63 +41,79 @@ macro_rules! check_cpi {
 
 #[macro_export]
 macro_rules! check_refresh_ixs {
-    ($ctx:expr, $reserve:ident, $mode:expr) => {{
-        let _reserve = $ctx.accounts.$reserve.load()?;
+    ($ctx_accounts:expr, $reserve:expr, $mode:expr $(,)?) => {{
+        let _reserve = $reserve.load()?;
         $crate::utils::check_refresh(
-            &$ctx.accounts.instruction_sysvar_account,
-            &[($ctx.accounts.$reserve.to_account_info().key(), &_reserve)],
-            &$ctx.accounts.obligation.to_account_info().key(),
+            &$ctx_accounts.instruction_sysvar_account,
+            &[($reserve.key(), &_reserve)],
+            &$ctx_accounts.obligation.to_account_info().key(),
             &[$mode],
         )?;
     }};
-    ($ctx:expr, $reserve_one:ident, $reserve_two:ident, $mode_one:expr, $mode_two:expr) => {{
-        let _reserve_one = $ctx.accounts.$reserve_one.load()?;
-        let _reserve_two = $ctx.accounts.$reserve_two.load()?;
+    ($ctx_accounts:expr, $reserve_one:expr, $reserve_two:expr, $mode_one:expr, $mode_two:expr $(,)?) => {{
+        let _reserve_one = $reserve_one.load()?;
+        let _reserve_two = $reserve_two.load()?;
 
-        if $ctx.accounts.$reserve_one.key() == $ctx.accounts.$reserve_two.key() {
+        if $reserve_one.key() == $reserve_two.key() {
             $crate::utils::check_refresh(
-                &$ctx.accounts.instruction_sysvar_account,
+                &$ctx_accounts.instruction_sysvar_account,
                 &[
-                    (
-                        $ctx.accounts.$reserve_one.to_account_info().key(),
-                        &_reserve_one,
-                    ),
-                    (
-                        $ctx.accounts.$reserve_one.to_account_info().key(),
-                        &_reserve_one,
-                    ),
+                    ($reserve_one.key(), &_reserve_one),
+                    ($reserve_one.key(), &_reserve_one),
                 ],
-                &$ctx.accounts.obligation.to_account_info().key(),
+                &$ctx_accounts.obligation.to_account_info().key(),
                 &[$mode_one, $mode_two],
             )?;
         } else {
             $crate::utils::check_refresh(
-                &$ctx.accounts.instruction_sysvar_account,
+                &$ctx_accounts.instruction_sysvar_account,
                 &[
-                    (
-                        $ctx.accounts.$reserve_one.to_account_info().key(),
-                        &_reserve_one,
-                    ),
-                    (
-                        $ctx.accounts.$reserve_two.to_account_info().key(),
-                        &_reserve_two,
-                    ),
+                    ($reserve_one.key(), &_reserve_one),
+                    ($reserve_two.key(), &_reserve_two),
                 ],
-                &$ctx.accounts.obligation.to_account_info().key(),
+                &$ctx_accounts.obligation.to_account_info().key(),
                 &[$mode_one, $mode_two],
             )?;
         }
     }};
 }
 
+#[macro_export]
+macro_rules! refresh_farms {
+    ($ctx_accounts:expr, [$(,)?]$(,)?) => {};
+    ($ctx_accounts:expr, $lending_market_authority:expr, [$(,)?]$(,)?) => {};
+    ($ctx_accounts:expr, [$($tail:tt)*]$(,)?) => {
+        refresh_farms!($ctx_accounts, $ctx_accounts.lending_market_authority, [$($tail)*]);
+    };
+    ($ctx_accounts:expr, $lending_market_authority:expr, [$(,)?($reserve:expr, $farm_accounts:expr, $mode:ident$(,)?) $($tail:tt)*]$(,)?) => {{
+        $crate::utils::cpi_refresh_farms::refresh_obligation_farms_for_reserve(
+            $crate::utils::cpi_refresh_farms::RefreshFarmsParams {
+                reserve: &$reserve,
+                farms_accounts: &$farm_accounts,
+                farm_kind: ReserveFarmKind::$mode,
+            },
+            &$ctx_accounts.obligation,
+            &$lending_market_authority,
+            &$ctx_accounts.lending_market,
+        )?;
+        refresh_farms!($ctx_accounts, $lending_market_authority, [$($tail)*]);
+    }};
+}
+
 #[cfg(target_arch = "bpf")]
 #[macro_export]
 macro_rules! dbg_msg {
-                () => {
+   
+   
+   
+   
+    () => {
         msg!("[{}:{}]", file!(), line!())
     };
     ($val:expr $(,)?) => {
-                      match $val {
+       
+       
+        match $val {
             tmp => {
                 msg!("[{}:{}] {} = {:#?}",
                     file!(), line!(), stringify!($val), &tmp);
@@ -106,11 +129,17 @@ macro_rules! dbg_msg {
 #[cfg(not(target_arch = "bpf"))]
 #[macro_export]
 macro_rules! dbg_msg {
-                () => {
+   
+   
+   
+   
+    () => {
         println!("[{}:{}]", file!(), line!())
     };
     ($val:expr $(,)?) => {
-                      match $val {
+       
+       
+        match $val {
             tmp => {
                 println!("[{}:{}] {} = {:#?}",
                     file!(), line!(), stringify!($val), &tmp);
@@ -129,10 +158,16 @@ macro_rules! xmsg {
     ($($arg:tt)*) => (::anchor_lang::prelude::msg!($($arg)*));
 }
 
-#[cfg(all(not(target_arch = "bpf")))]
+#[cfg(all(not(target_arch = "bpf"), not(feature = "tracing")))]
 #[macro_export]
 macro_rules! xmsg {
     ($($arg:tt)*) => (println!($($arg)*));
+}
+
+#[cfg(all(not(target_arch = "bpf"), feature = "tracing"))]
+#[macro_export]
+macro_rules! xmsg {
+    ($($arg:tt)*) => (tracing::info!($($arg)*));
 }
 
 #[cfg(not(target_arch = "bpf"))]
@@ -203,7 +238,8 @@ macro_rules! assert_fuzzy_eq_percentage {
         let percentage = $percentage as f64;
         let diff = (act - exp).abs();
         let diff_percentage = match exp {
-            0 => f64::MAX,            _ => (100.0 * diff as f64) / (exp as f64),
+            0 => f64::MAX,
+            _ => (100.0 * diff as f64) / (exp as f64),
         };
         if diff > 0 && diff_percentage > percentage {
             panic!("Actual {} Expected {} diff {} and percentage_diff > percentage ({}% > {}%)",
@@ -217,7 +253,8 @@ macro_rules! assert_fuzzy_eq_percentage {
         let percentage = $percentage as f64;
         let diff = (act - exp).abs();
         let diff_percentage = match exp {
-            0 => f64::MAX,            _ => (100.0 * diff as f64) / (exp as f64),
+            0 => f64::MAX,
+            _ => (100.0 * diff as f64) / (exp as f64),
         };
         if diff > 0 && diff_percentage > percentage {
             panic!("Actual {} Expected {} diff {} and percentage_diff > percentage ({}% > {}%) testcase: {}",
@@ -272,7 +309,9 @@ macro_rules! assert_almost_eq_fraction {
 #[macro_export]
 macro_rules! assert_gt {
     ($left:expr, $right:expr) => {
+       
         if !($left > $right) {
+           
             panic!(
                 "Assertion failed: {:?} is not greater than {:?}",
                 $left, $right
@@ -284,7 +323,9 @@ macro_rules! assert_gt {
 #[macro_export]
 macro_rules! assert_gte {
     ($left:expr, $right:expr) => {
+       
         if !($left >= $right) {
+           
             panic!(
                 "Assertion failed: {:?} is not greater than {:?}",
                 $left, $right
@@ -382,6 +423,7 @@ macro_rules! prop_assert_fuzzy_eq {
     };
 }
 
+
 #[macro_export]
 macro_rules! prop_assert_fuzzy_eq_percentage {
     ($actual: expr, $expected: expr, $epsilon: expr, $percentage: expr) => {
@@ -394,17 +436,13 @@ macro_rules! prop_assert_fuzzy_eq_percentage {
             0 => f64::MAX,
             _ => (100.0 * diff as f64) / (exp as f64),
         };
-        ::proptest::prop_assert!(
-            !(diff > eps && diff_percentage > percentage),
+        ::proptest::prop_assert!(!(diff > eps && diff_percentage > percentage),
             "Actual {} Expected {} diff {} and percentage_diff > percentage ({}% > {}%)",
-            $actual,
-            $expected,
-            diff,
-            diff_percentage,
-            percentage
+            $actual, $expected, diff, diff_percentage, percentage
         );
     };
 }
+
 
 #[macro_export]
 macro_rules! prop_assert_fuzzy_bps_diff {
@@ -419,6 +457,46 @@ macro_rules! prop_assert_fuzzy_bps_diff {
             expected_str = stringify!($expected),
             expected_value = $expected,
             bps_value = $bps_diff
+        );
+    };
+}
+
+#[macro_export]
+macro_rules! prop_assert_fuzzy_eq_fraction {
+    ($left:expr, $right:expr $(,)?) => {
+        $crate::prop_assert_fuzzy_eq_fraction!($left, $right, 0.0001);
+    };
+    ($left:expr, $right:expr, $epsilon_rate:expr $(,)?) => {
+        let left_val: Fraction = $left;
+        let right_val: Fraction = $right;
+        let diff = left_val.abs_diff(right_val);
+        let epsilon_rate: Fraction = $crate::fraction::fraction!($epsilon_rate);
+        let epsilon_max_diff_right = right_val * epsilon_rate;
+        let epsilon_max_diff_left = left_val * epsilon_rate;
+
+        ::proptest::prop_assert!(diff <= epsilon_max_diff_right && diff <= epsilon_max_diff_left,
+            "assertion failed: `(left ~= right)` \
+                \n  left: `{}`,\
+                \n right: `{}`,\
+                \n eps  : `{}`\n",
+            left_val, right_val, epsilon_rate
+        );
+    };
+    ($left:expr, $right:expr, $epsilon_rate:expr, $($arg:tt)+) => {
+        let left_val: Fraction = $left;
+        let right_val: Fraction = $right;
+        let diff = left_val.abs_diff(right_val);
+        let epsilon_rate: Fraction = $crate::fraction::fraction!($epsilon_rate);
+        let epsilon_max_diff_right = right_val * epsilon_rate;
+        let epsilon_max_diff_left = left_val * epsilon_rate;
+
+        ::proptest::prop_assert!(diff <= epsilon_max_diff_right && diff <= epsilon_max_diff_left,
+            "assertion failed: `(left ~= right)` \
+                \n  left: `{}`,\
+                \n right: `{}`,\
+                \n eps  : `{}`,\
+                \n reason: `{}`\n",
+            left_val, right_val, epsilon_rate, std::fmt::format(format_args!($($arg)+))
         );
     };
 }

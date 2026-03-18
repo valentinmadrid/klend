@@ -20,7 +20,7 @@ pub fn process(ctx: Context<FlashBorrowReserveLiquidity>, liquidity_amount: u64)
     let initial_reserve_token_balance = token_interface::accessor::amount(
         &ctx.accounts.reserve_source_liquidity.to_account_info(),
     )?;
-    let initial_reserve_available_liquidity = reserve.liquidity.available_amount;
+    let initial_reserve_available_liquidity = reserve.total_available_liquidity_amount();
 
     flash_ixs::flash_borrow_checks(&ctx, liquidity_amount)?;
 
@@ -47,7 +47,7 @@ pub fn process(ctx: Context<FlashBorrowReserveLiquidity>, liquidity_amount: u64)
     lending_checks::post_transfer_vault_balance_liquidity_reserve_checks(
         token_interface::accessor::amount(&ctx.accounts.reserve_source_liquidity.to_account_info())
             .unwrap(),
-        reserve.liquidity.available_amount,
+        reserve.total_available_liquidity_amount(),
         initial_reserve_token_balance,
         initial_reserve_available_liquidity,
         LendingAction::Subtractive(liquidity_amount),
@@ -56,10 +56,13 @@ pub fn process(ctx: Context<FlashBorrowReserveLiquidity>, liquidity_amount: u64)
     Ok(())
 }
 
+
 #[derive(Accounts)]
 pub struct FlashBorrowReserveLiquidity<'info> {
+   
     pub user_transfer_authority: Signer<'info>,
 
+    /// CHECK: Verified through create_program_address
     #[account(
         seeds = [seeds::LENDING_MARKET_AUTH, lending_market.key().as_ref()],
         bump = lending_market.load()?.bump_seed as u8,
@@ -79,25 +82,31 @@ pub struct FlashBorrowReserveLiquidity<'info> {
     )]
     pub reserve_liquidity_mint: Box<InterfaceAccount<'info, Mint>>,
 
+   
     #[account(mut,
         address = reserve.load()?.liquidity.supply_vault,
     )]
     pub reserve_source_liquidity: Box<InterfaceAccount<'info, TokenAccount>>,
 
+   
     #[account(mut)]
     pub user_destination_liquidity: Box<InterfaceAccount<'info, TokenAccount>>,
 
+   
     #[account(mut,
         address = reserve.load()?.liquidity.fee_vault
     )]
     pub reserve_liquidity_fee_receiver: Box<InterfaceAccount<'info, TokenAccount>>,
 
+   
     #[account(mut)]
     pub referrer_token_state: Option<AccountLoader<'info, ReferrerTokenState>>,
 
+   
     #[account(mut)]
     pub referrer_account: Option<AccountInfo<'info>>,
 
+    /// CHECK: fixed address
     #[account(address = sysvar::instructions::ID)]
     pub sysvar_info: AccountInfo<'info>,
     pub token_program: Interface<'info, TokenInterface>,

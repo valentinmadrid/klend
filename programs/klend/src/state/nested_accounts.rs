@@ -1,8 +1,14 @@
 use anchor_lang::{prelude::*, Accounts};
-use anchor_spl::token::Token;
-use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
+use anchor_spl::{
+    token::Token,
+    token_interface::{Mint, TokenAccount, TokenInterface},
+};
 
 use super::{obligation::Obligation, LendingMarket, Reserve};
+
+
+
+
 
 #[derive(Accounts)]
 pub struct DepositReserveLiquidityAccounts<'info> {
@@ -13,6 +19,7 @@ pub struct DepositReserveLiquidityAccounts<'info> {
     pub reserve_liquidity_supply: Box<InterfaceAccount<'info, TokenAccount>>,
     pub reserve_collateral_mint: Box<InterfaceAccount<'info, Mint>>,
     pub lending_market: AccountLoader<'info, LendingMarket>,
+    /// CHECK: Verified in each ix handler through create_program_address
     pub lending_market_authority: AccountInfo<'info>,
     pub owner: Signer<'info>,
     pub liquidity_token_program: Interface<'info, TokenInterface>,
@@ -42,6 +49,7 @@ pub struct WithdrawObligationCollateralAccounts<'info> {
     pub withdraw_reserve: AccountLoader<'info, Reserve>,
     pub obligation: AccountLoader<'info, Obligation>,
     pub lending_market: AccountLoader<'info, LendingMarket>,
+    /// CHECK: Verified in each ix handler through create_program_address
     pub lending_market_authority: AccountInfo<'info>,
     pub obligation_owner: Signer<'info>,
     pub token_program: Program<'info, Token>,
@@ -69,6 +77,7 @@ pub struct RedeemReserveCollateralAccounts<'info> {
     #[account(mut)]
     pub reserve_liquidity_supply: Box<InterfaceAccount<'info, TokenAccount>>,
     pub lending_market: AccountLoader<'info, LendingMarket>,
+    /// CHECK: Verified in each ix handler through create_program_address
     pub lending_market_authority: AccountInfo<'info>,
     pub owner: Signer<'info>,
     pub collateral_token_program: Program<'info, Token>,

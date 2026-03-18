@@ -1,3 +1,22 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 use std::fmt::{self, Display, Formatter};
 
 use anchor_lang::prelude::*;
@@ -11,15 +30,21 @@ static_assertions::const_assert_eq!(
     std::mem::size_of::<ReferrerTokenState>()
 );
 static_assertions::const_assert_eq!(0, std::mem::size_of::<ReferrerTokenState>() % 8);
+
 #[derive(PartialEq, Derivative, Default)]
 #[derivative(Debug)]
 #[account(zero_copy)]
 #[repr(C)]
 pub struct ReferrerTokenState {
+
     pub referrer: Pubkey,
+
     pub mint: Pubkey,
+
     pub amount_unclaimed_sf: u128,
+
     pub amount_cumulative_sf: u128,
+
     pub bump: u64,
 
     #[derivative(Debug = "ignore")]
@@ -36,8 +61,9 @@ impl Display for ReferrerTokenState {
             bump: _,
             padding: _,
         } = self;
-        let amount_unclaimed: u64 = Fraction::from_bits(*amount_unclaimed_sf).to_num();
-        let amount_cumulative: u64 = Fraction::from_bits(*amount_cumulative_sf).to_num();
+        let amount_unclaimed = Fraction::from_bits(*amount_unclaimed_sf).saturating_to_num::<u64>();
+        let amount_cumulative =
+            Fraction::from_bits(*amount_cumulative_sf).saturating_to_num::<u64>();
         write!(
             f,
             "Referrer Account: referrer: {}, mint: {}, amount_unclaimed (integer part): {}, amount_cumulative (integer part): {}",
@@ -50,14 +76,19 @@ impl Display for ReferrerTokenState {
 
 static_assertions::const_assert_eq!(USER_METADATA_SIZE, std::mem::size_of::<UserMetadata>());
 static_assertions::const_assert_eq!(0, std::mem::size_of::<UserMetadata>() % 8);
+
 #[derive(PartialEq, Derivative)]
 #[derivative(Debug)]
 #[account(zero_copy)]
 #[repr(C)]
 pub struct UserMetadata {
+
     pub referrer: Pubkey,
+
     pub bump: u64,
+
     pub user_lookup_table: Pubkey,
+
     pub owner: Pubkey,
 
     #[derivative(Debug = "ignore")]

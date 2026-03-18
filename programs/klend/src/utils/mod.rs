@@ -1,14 +1,16 @@
 pub mod account_loader_trait;
 pub mod account_ops;
+pub mod accounts;
 pub mod borrow_rate_curve;
 pub mod constraints;
 pub mod consts;
+pub mod emit_cpi_support;
 pub mod fraction;
 pub mod macros;
 pub mod prices;
 pub mod refresh_ix_utils;
+pub mod secs;
 pub mod seeds;
-pub mod slots;
 pub mod spltoken;
 pub mod token_transfer;
 pub mod validation;
@@ -18,6 +20,7 @@ pub use account_ops::*;
 use anchor_lang::prelude::Pubkey;
 pub use constraints::*;
 pub use consts::*;
+pub use emit_cpi_support::*;
 pub use fraction::*;
 pub use prices::*;
 pub use refresh_ix_utils::*;
@@ -31,4 +34,8 @@ pub fn maybe_null_pk(pubkey: Pubkey) -> Option<Pubkey> {
     } else {
         Some(pubkey)
     }
+}
+
+pub fn borsh_deserialize<T: borsh::BorshDeserialize>(mut data: &[u8]) -> T {
+    T::deserialize(&mut data).expect("Borsh deserialization failed")
 }

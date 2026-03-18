@@ -1,16 +1,15 @@
 use anchor_lang::{prelude::*, Accounts};
 use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
-use crate::utils::constraints;
 use crate::{
     gen_signer_seeds,
     lending_market::lending_operations,
     state::{LendingMarket, Reserve},
-    utils::{seeds, token_transfer},
+    utils::{constraints, seeds, token_transfer},
 };
 
 pub fn process(ctx: Context<RedeemFees>) -> Result<()> {
-    constraints::token_2022::validate_liquidity_token_extensions(
+    constraints::token_2022::check_only_supported_liquidity_token_extensions(
         &ctx.accounts.reserve_liquidity_mint.to_account_info(),
         &ctx.accounts.reserve_supply_liquidity.to_account_info(),
     )?;
@@ -49,7 +48,7 @@ pub struct RedeemFees<'info> {
     #[account(mut,
         has_one = lending_market)]
     pub reserve: AccountLoader<'info, Reserve>,
-    #[account(mut,
+    #[account(
         address = reserve.load()?.liquidity.mint_pubkey,
         mint::token_program = token_program,
     )]
@@ -62,6 +61,7 @@ pub struct RedeemFees<'info> {
     pub reserve_supply_liquidity: Box<InterfaceAccount<'info, TokenAccount>>,
 
     pub lending_market: AccountLoader<'info, LendingMarket>,
+    /// CHECK: Verified through create_program_address
     #[account(
         seeds = [seeds::LENDING_MARKET_AUTH, lending_market.key().as_ref()],
         bump = lending_market.load()?.bump_seed as u8,

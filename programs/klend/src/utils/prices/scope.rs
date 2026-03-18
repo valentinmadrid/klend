@@ -9,7 +9,7 @@ use super::{
 };
 use crate::{
     dbg_msg,
-    utils::{prices::Price, NULL_PUBKEY, U128},
+    utils::{prices::Price, MAX_PRICE_DECIMALS_U256, NULL_PUBKEY, TARGET_PRICE_DECIMALS, U256},
     LendingError, Result, ScopeConfiguration,
 };
 
@@ -51,6 +51,11 @@ impl From<Price<u64>> for scope::Price {
     }
 }
 
+
+
+
+
+
 fn get_price_account<'a>(scope_price_account: &'a AccountInfo) -> Result<Ref<'a, ScopePrices>> {
     if *scope_price_account.key == NULL_PUBKEY {
         return Err(LendingError::InvalidOracleConfig.into());
@@ -60,11 +65,15 @@ fn get_price_account<'a>(scope_price_account: &'a AccountInfo) -> Result<Ref<'a,
 
     let disc_bytes = &data[0..8];
     if disc_bytes != ScopePrices::discriminator() {
+       
         return Err(LendingError::CouldNotDeserializeScope.into());
     }
 
     Ok(Ref::map(data, |data| bytemuck::from_bytes(&data[8..])))
 }
+
+
+
 
 fn get_price_usd(
     scope_prices: &ScopePrices,
@@ -74,6 +83,7 @@ fn get_price_usd(
         msg!("Scope chain is not initialized properly");
         return err!(LendingError::PriceNotValid);
     }
+   
     let price_chain_raw = tokens_chain.map(|token_id| get_base_price(scope_prices, token_id));
 
     let chain_len = price_chain_raw.iter().take_while(|v| v.is_some()).count();
@@ -83,10 +93,9 @@ fn get_price_usd(
         return err!(LendingError::NoPriceFound);
     }
 
-    let price_chain = &price_chain_raw[..chain_len];
-
+   
     if chain_len == 1 {
-        let price = price_chain[0].unwrap();
+        let price = price_chain_raw[0].unwrap();
         let price_load = Box::new(move || Ok(price_to_fraction(price.0)));
         return Ok(TimestampedPrice {
             price_load,
@@ -94,28 +103,38 @@ fn get_price_usd(
         });
     }
 
-    let oldest_timestamp = price_chain.iter().flatten().map(|x| x.1).min().unwrap();
+    let oldest_timestamp = price_chain_raw
+        .iter()
+        .take(chain_len)
+        .flatten()
+        .map(|x| x.1)
+        .min()
+        .unwrap();
 
+    let init_price: Price<U256> = Price {
+        value: U256::from(1_u64),
+        exp: 0,
+    };
     let price_load = Box::new(move || {
         let price_chain = &price_chain_raw[..chain_len];
-        let total_decimals: u32 = price_chain
+        let base_price = price_chain
             .iter()
             .flatten()
-            .try_fold(0u32, |acc, price| acc.checked_add(price.0.exp))
-            .ok_or_else(|| dbg_msg!(LendingError::MathOverflow))?;
-
-        let product = price_chain
-            .iter()
-            .flatten()
-            .try_fold(U128::from(1u128), |acc, price| {
-                acc.checked_mul(price.0.value.into())
+            .map(|x| x.0.size_up::<U256>())
+            .try_fold(init_price, |acc, x| {
+                let (current_price, next_price) = if acc.exp + x.exp > MAX_PRICE_DECIMALS_U256 {
+                    (
+                        acc.reduce_exp_lossy(TARGET_PRICE_DECIMALS)?,
+                        x.reduce_exp_lossy(TARGET_PRICE_DECIMALS)?,
+                    )
+                } else {
+                    (acc, x)
+                };
+                let value = current_price.value.checked_mul(next_price.value)?;
+                let exp = current_price.exp + next_price.exp;
+                Some(Price { value, exp })
             })
             .ok_or_else(|| dbg_msg!(LendingError::MathOverflow))?;
-
-        let base_price = Price {
-            value: product,
-            exp: total_decimals,
-        };
 
         Ok(price_to_fraction(base_price))
     });
@@ -126,9 +145,12 @@ fn get_price_usd(
     })
 }
 
+
+
 fn get_base_price(scope_prices: &ScopePrices, token: ScopePriceId) -> Option<(Price<u64>, u64)> {
     scope_prices
         .prices
         .get(usize::from(token))
         .map(|price| (price.price.into(), price.unix_timestamp))
 }
+

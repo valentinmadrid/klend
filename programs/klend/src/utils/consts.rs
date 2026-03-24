@@ -229,7 +229,7 @@ pub const CPI_WHITELISTED_ACCOUNTS: [CpiWhitelistedAccount; 19] = [
     CpiWhitelistedAccount::new(SQUADS_PROGRAM_ID_V3_MAINNET_DEV, 1),
     CpiWhitelistedAccount::new(SQUADS_PROGRAM_ID_V4_MAINNET_PROD, 1),
     CpiWhitelistedAccount::new(SQUADS_PROGRAM_ID_V4_MAINNET_DEV, 1),
-    CpiWhitelistedAccount::new(SQUADS_SMART_ACCOUNT_PROGRAM_ID_MAINNET_PROD, 1),
+    CpiWhitelistedAccount::new(SQUADS_SMART_ACCOUNT_PROGRAM_ID_MAINNET_PROD, 2),
     CpiWhitelistedAccount::new(METEORA_DYNAMIC_POOL_ID_MAINNET, 1),
     CpiWhitelistedAccount::new(DEFI_CARROT_ID_MAINNET, 1),
     CpiWhitelistedAccount::new(SANDGLASS_ID_MAINNET, 1),
